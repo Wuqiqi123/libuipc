@@ -122,4 +122,41 @@ void AffineBodyStateAccessorFeatureOverrider::do_copy_velocity_to(backend::Buffe
                 dst  = dst_view.viewer().name("dst")] __device__(int i) mutable
                { dst(i) = q_v_to_transform_v(q_in(i)); });
 }
+
+void AffineBodyStateAccessorFeatureOverrider::do_copy_transform_from(
+    backend::BufferView buffer_view, IndexT body_offset, SizeT body_count)
+{
+    auto* src_ptr = reinterpret_cast<const Matrix4x4*>(buffer_view.handle())
+                    + buffer_view.offset();
+    muda::CBufferView<Matrix4x4> src_view{src_ptr, body_count};
+    auto q_subview = m_abd.m_impl.body_id_to_q.view(body_offset, body_count);
+
+    muda::ParallelFor()
+        .file_line(__FILE__, __LINE__)
+        .apply(body_count,
+               [src = src_view.cviewer().name("transform_in"),
+                dst = q_subview.viewer().name("q_out")] __device__(int i) mutable
+               { dst(i) = transform_to_q(src(i)); });
+
+    m_vertex_reporter.request_attribute_update();
+    m_joint_dof_manager.update_dof_attributes();
+}
+
+void AffineBodyStateAccessorFeatureOverrider::do_copy_velocity_from(
+    backend::BufferView buffer_view, IndexT body_offset, SizeT body_count)
+{
+    auto* src_ptr = reinterpret_cast<const Matrix4x4*>(buffer_view.handle())
+                    + buffer_view.offset();
+    muda::CBufferView<Matrix4x4> src_view{src_ptr, body_count};
+    auto q_v_subview = m_abd.m_impl.body_id_to_q_v.view(body_offset, body_count);
+
+    muda::ParallelFor()
+        .file_line(__FILE__, __LINE__)
+        .apply(body_count,
+               [src = src_view.cviewer().name("velocity_in"),
+                dst = q_v_subview.viewer().name("q_v_out")] __device__(int i) mutable
+               { dst(i) = transform_v_to_q_v(src(i)); });
+
+    m_vertex_reporter.request_attribute_update();
+}
 }  // namespace uipc::backend::cuda

@@ -104,6 +104,64 @@ void AffineBodyStateAccessorFeature::copy_velocity_to(backend::BufferView buffer
     m_impl->do_copy_velocity_to(buffer_view, body_offset, body_count);
 }
 
+void AffineBodyStateAccessorFeature::copy_transform_from(backend::BufferView buffer_view,
+                                                         IndexT body_offset,
+                                                         SizeT body_count) const
+{
+    auto total_body_num = this->body_count();
+    UIPC_ASSERT_THROW(body_offset <= total_body_num,
+                      "body_offset ({}) must not be larger than total body number ({})",
+                      body_offset,
+                      total_body_num);
+
+    if(body_count == ~0ull)
+        body_count = total_body_num - body_offset;
+
+    UIPC_ASSERT_THROW(body_offset + body_count <= total_body_num,
+                      "The requested range [{}, {}) is out of bounds for total bodies ({})",
+                      body_offset,
+                      body_offset + body_count,
+                      total_body_num);
+    UIPC_ASSERT_THROW(buffer_view && buffer_view.backend() == "cuda",
+                      "Affine transform source must be a valid CUDA buffer view.");
+    UIPC_ASSERT_THROW(buffer_view.size() >= body_count
+                          && buffer_view.element_size() == sizeof(Matrix4x4)
+                          && buffer_view.element_stride() == sizeof(Matrix4x4),
+                      "Affine transform source must contain at least {} contiguous Matrix4x4 values.",
+                      body_count);
+
+    m_impl->do_copy_transform_from(buffer_view, body_offset, body_count);
+}
+
+void AffineBodyStateAccessorFeature::copy_velocity_from(backend::BufferView buffer_view,
+                                                        IndexT body_offset,
+                                                        SizeT  body_count) const
+{
+    auto total_body_num = this->body_count();
+    UIPC_ASSERT_THROW(body_offset <= total_body_num,
+                      "body_offset ({}) must not be larger than total body number ({})",
+                      body_offset,
+                      total_body_num);
+
+    if(body_count == ~0ull)
+        body_count = total_body_num - body_offset;
+
+    UIPC_ASSERT_THROW(body_offset + body_count <= total_body_num,
+                      "The requested range [{}, {}) is out of bounds for total bodies ({})",
+                      body_offset,
+                      body_offset + body_count,
+                      total_body_num);
+    UIPC_ASSERT_THROW(buffer_view && buffer_view.backend() == "cuda",
+                      "Affine velocity source must be a valid CUDA buffer view.");
+    UIPC_ASSERT_THROW(buffer_view.size() >= body_count
+                          && buffer_view.element_size() == sizeof(Matrix4x4)
+                          && buffer_view.element_stride() == sizeof(Matrix4x4),
+                      "Affine velocity source must contain at least {} contiguous Matrix4x4 values.",
+                      body_count);
+
+    m_impl->do_copy_velocity_from(buffer_view, body_offset, body_count);
+}
+
 std::string_view AffineBodyStateAccessorFeature::get_name() const
 {
     return FeatureName;

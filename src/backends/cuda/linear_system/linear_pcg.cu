@@ -140,15 +140,15 @@ void LinearPCG::check_init_rz_nan_inf(Float rz)
         bool r_bad  = !std::isfinite(norm_r);
         auto hint = r_bad ? "gradient assembling produced NaN values, likely due to error in formula implementation" :
                             "preconditioner failed, likely due to inverse matrix calculation failure";
-        UIPC_ASSERT(false,
-                    "Frame {}, Newton {}, PCG Init: r^T*z = {}, norm(r) = {}, norm(z) = {}. "
-                    "Hint: {}.",
-                    engine().frame(),
-                    engine().newton_iter(),
-                    rz,
-                    norm_r,
-                    norm_z,
-                    hint);
+        throw SimEngineException(
+            fmt::format("Frame {}, Newton {}, PCG Init: r^T*z = {}, norm(r) = {}, norm(z) = {}. "
+                        "Hint: {}.",
+                        engine().frame(),
+                        engine().newton_iter(),
+                        rz,
+                        norm_r,
+                        norm_z,
+                        hint));
     }
 }
 
@@ -163,16 +163,16 @@ void LinearPCG::check_iter_rz_nan_inf(Float rz, SizeT k)
         auto hint = (r_ok && z_bad) ?
                         "preconditioner failed, likely due to inverse matrix calculation failure" :
                         "PCG iteration diverged";
-        UIPC_ASSERT(false,
-                    "Frame {}, Newton {}, PCG Iter {}: r^T*z = {}, norm(r) = {}, norm(z) = {}. "
-                    "Hint: {}.",
-                    engine().frame(),
-                    engine().newton_iter(),
-                    k,
-                    rz,
-                    norm_r,
-                    norm_z,
-                    hint);
+        throw SimEngineException(
+            fmt::format("Frame {}, Newton {}, PCG Iter {}: r^T*z = {}, norm(r) = {}, norm(z) = {}. "
+                        "Hint: {}.",
+                        engine().frame(),
+                        engine().newton_iter(),
+                        k,
+                        rz,
+                        norm_r,
+                        norm_z,
+                        hint));
     }
 }
 

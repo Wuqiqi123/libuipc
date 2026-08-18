@@ -258,10 +258,7 @@ void SimEngine::advance()
     *                                  Core Pipeline
     ***************************************************************************************/
 
-    // Abort on exception if the runtime check is enabled for debugging
-    constexpr bool AbortOnException = uipc::RUNTIME_CHECK;
-
-    auto pipeline = [&]() noexcept(AbortOnException)
+    auto pipeline = [&]()
     {
         Timer timer{"Pipeline"};
 
@@ -448,7 +445,9 @@ void SimEngine::advance()
     }
     catch(const std::exception& e)
     {
-        UIPC_ASSERT(false, "Unexpected Exception: {}", e.what());
+        const auto message = fmt::format("Unexpected Exception: {}", e.what());
+        logger::error("Engine Advance Error: {}", message);
+        status().push_back(core::EngineStatus::error(message));
     }
 }
 }  // namespace uipc::backend::cuda

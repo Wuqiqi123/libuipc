@@ -4,6 +4,7 @@
 #include <uipc/constitution/stable_neo_hookean.h>
 #include <uipc/core/affine_body_state_accessor_feature.h>
 #include <uipc/core/finite_element_state_accessor_feature.h>
+#include <cuda_runtime_api.h>
 
 TEST_CASE("43_abd_fem_state_access", "[abd_fem]")
 {
@@ -103,9 +104,40 @@ TEST_CASE("43_abd_fem_state_access", "[abd_fem]")
             auto init_trans_view = mesh_b.transforms().view();
             std::ranges::copy(init_trans_view, trans_view.begin());
 
-            // apply modified state back
-            abd_accessor->copy_from(abd_state);
+            // Apply the affine transform and velocity through public device
+            // views, matching external solver coupling use cases.
+            auto       input_transforms  = vector<Matrix4x4>{trans_view[0]};
+            auto       input_velocities  = vector<Matrix4x4>{Matrix4x4::Zero()};
+            Matrix4x4* device_transforms = nullptr;
+            Matrix4x4* device_velocities = nullptr;
+            REQUIRE(cudaMalloc(reinterpret_cast<void**>(&device_transforms),
+                               sizeof(Matrix4x4))
+                    == cudaSuccess);
+            REQUIRE(cudaMalloc(reinterpret_cast<void**>(&device_velocities),
+                               sizeof(Matrix4x4))
+                    == cudaSuccess);
+            REQUIRE(cudaMemcpy(device_transforms, input_transforms.data(), sizeof(Matrix4x4), cudaMemcpyHostToDevice)
+                    == cudaSuccess);
+            REQUIRE(cudaMemcpy(device_velocities, input_velocities.data(), sizeof(Matrix4x4), cudaMemcpyHostToDevice)
+                    == cudaSuccess);
+            abd_accessor->copy_transform_from(
+                backend::BufferView{reinterpret_cast<backend::HandleT>(device_transforms),
+                                    0,
+                                    input_transforms.size(),
+                                    sizeof(Matrix4x4),
+                                    sizeof(Matrix4x4),
+                                    "cuda"});
+            abd_accessor->copy_velocity_from(
+                backend::BufferView{reinterpret_cast<backend::HandleT>(device_velocities),
+                                    0,
+                                    input_velocities.size(),
+                                    sizeof(Matrix4x4),
+                                    sizeof(Matrix4x4),
+                                    "cuda"});
             fem_accessor->copy_from(fem_state);
+            world.sync();
+            REQUIRE(cudaFree(device_transforms) == cudaSuccess);
+            REQUIRE(cudaFree(device_velocities) == cudaSuccess);
 
             world.retrieve();
             sio.write_surface(

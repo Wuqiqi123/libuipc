@@ -30,4 +30,10 @@ void ContactSystemFeatureOverrider::get_contact_energy(std::string_view prim_typ
 {
     m_manager->get_contact_energy(prim_type, prims);
 }
+
+core::ContactGradientDeviceView ContactSystemFeatureOverrider::get_contact_gradient_device_view(
+    std::string_view prim_type)
+{
+    return m_manager->get_contact_gradient_device_view(prim_type);
+}
 }  // namespace uipc::backend::cuda

@@ -21,6 +21,12 @@ class AffineBodyStateAccessorFeatureOverrider final : public core::AffineBodySta
 
     void do_copy_transform_to(backend::BufferView buffer_view, IndexT body_offset, SizeT body_count) override;
     void do_copy_velocity_to(backend::BufferView buffer_view, IndexT body_offset, SizeT body_count) override;
+    void do_copy_transform_from(backend::BufferView buffer_view,
+                                IndexT              body_offset,
+                                SizeT               body_count) override;
+    void do_copy_velocity_from(backend::BufferView buffer_view,
+                               IndexT              body_offset,
+                               SizeT               body_count) override;
 
   private:
     AffineBodyDynamics&       m_abd;

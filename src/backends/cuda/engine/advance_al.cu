@@ -247,10 +247,7 @@ void SimEngine::advance_AL()
     *                                  Core Pipeline
     ***************************************************************************************/
 
-    // Abort on exception if the runtime check is enabled for debugging
-    constexpr bool AbortOnException = uipc::RUNTIME_CHECK;
-
-    auto pipeline = [&]() noexcept(AbortOnException)
+    auto pipeline = [&]()
     {
         Timer timer{"Pipeline"};
 

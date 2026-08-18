@@ -32,4 +32,9 @@ void ContactExporter::contact_hessian(std::string_view prim_type, geometry::Geom
 {
     get_contact_hessian(prim_type, vert_hess);
 }
+
+core::ContactGradientDeviceView ContactExporter::contact_gradient_device_view(std::string_view prim_type)
+{
+    return get_contact_gradient_device_view(prim_type);
+}
 }  // namespace uipc::backend::cuda

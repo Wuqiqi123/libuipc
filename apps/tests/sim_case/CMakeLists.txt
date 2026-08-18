@@ -1,6 +1,6 @@
 file(GLOB SOURCE "*.cpp" "*.h")
 uipc_add_test(sim_case ${SOURCE})
-target_link_libraries(sim_case PRIVATE uipc::backends)
+target_link_libraries(sim_case PRIVATE uipc::backends CUDA::cudart)
 
 # Serialize PDB writes on MSVC to avoid C1041 when many .cpp files compile in parallel
 if(MSVC)

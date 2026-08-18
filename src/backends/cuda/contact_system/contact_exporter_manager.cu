@@ -72,6 +72,14 @@ void ContactExporterManager::get_contact_hessian(std::string_view    prim_type,
     exporter->contact_hessian(prim_type, prim_hess);
 }
 
+core::ContactGradientDeviceView ContactExporterManager::get_contact_gradient_device_view(std::string_view prim_type)
+{
+    auto exporter = find_exporter(prim_type);
+    if(!exporter)
+        return {};
+    return exporter->contact_gradient_device_view(prim_type);
+}
+
 vector<std::string> ContactExporterManager::get_contact_primitive_types() const
 {
     return m_contact_prim_types;

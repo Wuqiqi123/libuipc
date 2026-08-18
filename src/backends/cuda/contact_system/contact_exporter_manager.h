@@ -1,5 +1,6 @@
 #pragma once
 #include <sim_system.h>
+#include <uipc/core/contact_system_feature.h>
 #include <contact_system/simplex_frictional_contact.h>
 #include <collision_detection/global_trajectory_filter.h>
 #include <collision_detection/simplex_trajectory_filter.h>
@@ -28,6 +29,7 @@ class ContactExporterManager final : public SimSystem
     void get_contact_energy(std::string_view prim_type, geometry::Geometry& prim_energy);
     void get_contact_gradient(std::string_view prim_type, geometry::Geometry& prim_grad);
     void get_contact_hessian(std::string_view prim_type, geometry::Geometry& prim_hess);
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type);
 
     vector<std::string> get_contact_primitive_types() const;
 

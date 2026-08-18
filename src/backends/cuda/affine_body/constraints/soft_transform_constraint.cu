@@ -3,9 +3,29 @@
 #include <uipc/builtin/attribute_name.h>
 #include <kernel_cout.h>
 #include <animator/utils.h>
+#include <uipc/core/soft_transform_constraint_accessor_feature.h>
 
 namespace uipc::backend::cuda
 {
+class SoftTransformConstraint;
+
+class SoftTransformConstraintAccessorFeatureOverrider final
+    : public core::SoftTransformConstraintAccessorFeatureOverrider
+{
+  public:
+    explicit SoftTransformConstraintAccessorFeatureOverrider(SoftTransformConstraint& constraint)
+        : m_constraint(constraint)
+    {
+    }
+
+    void do_bind_aim_transforms(backend::BufferView buffer_view) override;
+    void do_unbind_aim_transforms() override;
+    bool do_has_bound_aim_transforms() const override;
+
+  private:
+    SoftTransformConstraint& m_constraint;
+};
+
 inline UIPC_GENERIC Matrix12x12 compute_constraint_mass(const ABDJacobiDyadicMass& mass,
                                                         Float translation_strength,
                                                         Float rotation_strength)
@@ -14,7 +34,9 @@ inline UIPC_GENERIC Matrix12x12 compute_constraint_mass(const ABDJacobiDyadicMas
     Float s_r = rotation_strength;
     Float m   = mass.mass();
 
-    MUDA_ASSERT(m > 0.0, "ABDJacobiDyadicMass has non-positive mass (%f), cannot build constraint mass matrix.", m);
+    MUDA_ASSERT(m > 0.0,
+                "ABDJacobiDyadicMass has non-positive mass (%f), cannot build constraint mass matrix.",
+                m);
 
     Matrix12x12 M = mass.to_mat();
 
@@ -47,8 +69,15 @@ class SoftTransformConstraint final : public AffineBodyConstraint
     muda::DeviceBuffer<IndexT>   constrained_bodies;
     muda::DeviceBuffer<Vector12> aim_transforms;
     muda::DeviceBuffer<Vector2>  strength_ratios;
+    backend::BufferView          external_aim_transforms;
 
-    virtual void do_build(BuildInfo& info) override {}
+    virtual void do_build(BuildInfo& info) override
+    {
+        auto overrider =
+            std::make_shared<SoftTransformConstraintAccessorFeatureOverrider>(*this);
+        features().insert(
+            std::make_shared<core::SoftTransformConstraintAccessorFeature>(overrider));
+    }
 
     virtual U64 get_uid() const noexcept override
     {
@@ -96,8 +125,11 @@ class SoftTransformConstraint final : public AffineBodyConstraint
                 if(is_constrained)
                 {
                     h_constrained_bodies.push_back(bI);
-                    Vector12 q = transform_to_q(aim_transform);
-                    h_aim_transforms.push_back(q);
+                    if(!external_aim_transforms)
+                    {
+                        Vector12 q = transform_to_q(aim_transform);
+                        h_aim_transforms.push_back(q);
+                    }
                     h_strength_ratios.push_back(strength_ratio);
                     UIPC_ASSERT(strength_ratio(0) >= 0.0 && strength_ratio(1) >= 0.0,
                                 "Strength ratios must be non-negative, but got ({}, {})",
@@ -109,8 +141,20 @@ class SoftTransformConstraint final : public AffineBodyConstraint
         constrained_bodies.resize(h_constrained_bodies.size());
         constrained_bodies.view().copy_from(h_constrained_bodies.data());
 
-        aim_transforms.resize(h_aim_transforms.size());
-        aim_transforms.view().copy_from(h_aim_transforms.data());
+        if(external_aim_transforms && !h_constrained_bodies.empty())
+        {
+            const SizeT required_count =
+                static_cast<SizeT>(*std::ranges::max_element(h_constrained_bodies) + 1);
+            UIPC_ASSERT_THROW(external_aim_transforms.size() >= required_count,
+                              "Soft transform target buffer contains {} bodies, but constrained body {} is required.",
+                              external_aim_transforms.size(),
+                              required_count - 1);
+        }
+        else if(!external_aim_transforms)
+        {
+            aim_transforms.resize(h_aim_transforms.size());
+            aim_transforms.view().copy_from(h_aim_transforms.data());
+        }
 
         strength_ratios.resize(h_strength_ratios.size());
         strength_ratios.view().copy_from(h_strength_ratios.data());
@@ -130,6 +174,15 @@ class SoftTransformConstraint final : public AffineBodyConstraint
     {
         using namespace muda;
 
+        auto* external_ptr =
+            external_aim_transforms ?
+                reinterpret_cast<const Matrix4x4*>(external_aim_transforms.handle())
+                    + external_aim_transforms.offset() :
+                nullptr;
+        CBufferView<Matrix4x4> external_aims{
+            external_ptr, external_aim_transforms ? external_aim_transforms.size() : 0};
+        const bool use_external_aims = external_aim_transforms.operator bool();
+
         ParallelFor()
             .file_line(__FILE__, __LINE__)
             .apply(constrained_bodies.size(),
@@ -138,6 +191,8 @@ class SoftTransformConstraint final : public AffineBodyConstraint
                     qs            = info.qs().viewer().name("qs"),
                     q_prevs       = info.q_prevs().viewer().name("q_prevs"),
                     aim_transforms = aim_transforms.viewer().name("aim_transforms"),
+                    external_aims = external_aims.cviewer().name("external_aims"),
+                    use_external_aims,
                     strength_ratios = strength_ratios.viewer().name("strength_ratios"),
                     body_masses = info.body_masses().viewer().name("body_masses"),
                     energies = info.energies().viewer().name("energies"),
@@ -154,9 +209,12 @@ class SoftTransformConstraint final : public AffineBodyConstraint
                        {
                            Vector12 q      = qs(i);
                            Vector12 q_prev = q_prevs(i);
-                           Vector12 q_aim = lerp(q_prev, aim_transforms(I), substep_ratio);
-                           Vector12 dq = q - q_aim;
-                           Vector2  s  = strength_ratios(I);
+                           Vector12 target = use_external_aims ?
+                                                 transform_to_q(external_aims(i)) :
+                                                 aim_transforms(I);
+                           Vector12 q_aim = lerp(q_prev, target, substep_ratio);
+                           Vector12 dq    = q - q_aim;
+                           Vector2  s     = strength_ratios(I);
 
                            Matrix12x12 M =
                                compute_constraint_mass(body_masses(i), s(0), s(1));
@@ -170,6 +228,15 @@ class SoftTransformConstraint final : public AffineBodyConstraint
     {
         using namespace muda;
 
+        auto* external_ptr =
+            external_aim_transforms ?
+                reinterpret_cast<const Matrix4x4*>(external_aim_transforms.handle())
+                    + external_aim_transforms.offset() :
+                nullptr;
+        CBufferView<Matrix4x4> external_aims{
+            external_ptr, external_aim_transforms ? external_aim_transforms.size() : 0};
+        const bool use_external_aims = external_aim_transforms.operator bool();
+
         ParallelFor()
             .file_line(__FILE__, __LINE__)
             .apply(constrained_bodies.size(),
@@ -178,6 +245,8 @@ class SoftTransformConstraint final : public AffineBodyConstraint
                     qs            = info.qs().viewer().name("qs"),
                     q_prevs       = info.q_prevs().viewer().name("q_prevs"),
                     aim_transforms = aim_transforms.viewer().name("aim_transforms"),
+                    external_aims = external_aims.cviewer().name("external_aims"),
+                    use_external_aims,
                     strength_ratios = strength_ratios.viewer().name("strength_ratios"),
                     body_masses = info.body_masses().viewer().name("body_masses"),
                     gradients = info.gradients().viewer().name("gradients"),
@@ -199,9 +268,12 @@ class SoftTransformConstraint final : public AffineBodyConstraint
                        {
                            Vector12 q      = qs(i);
                            Vector12 q_prev = q_prevs(i);
-                           Vector12 q_aim = lerp(q_prev, aim_transforms(I), substep_ratio);
-                           Vector12 dq = q - q_aim;
-                           Vector2  s  = strength_ratios(I);
+                           Vector12 target = use_external_aims ?
+                                                 transform_to_q(external_aims(i)) :
+                                                 aim_transforms(I);
+                           Vector12 q_aim = lerp(q_prev, target, substep_ratio);
+                           Vector12 dq    = q - q_aim;
+                           Vector2  s     = strength_ratios(I);
 
                            M = compute_constraint_mass(body_masses(i), s(0), s(1));
                            G = M * dq;
@@ -215,7 +287,42 @@ class SoftTransformConstraint final : public AffineBodyConstraint
                        hessians(I).write(i, i, M);
                    });
     }
+
+    void bind_aim_transforms(backend::BufferView buffer_view)
+    {
+        const auto required_count =
+            h_constrained_bodies.empty() ?
+                SizeT{0} :
+                static_cast<SizeT>(*std::ranges::max_element(h_constrained_bodies) + 1);
+        UIPC_ASSERT_THROW(buffer_view.size() >= required_count,
+                          "Soft transform target buffer contains {} bodies, but constrained body {} is required.",
+                          buffer_view.size(),
+                          required_count == 0 ? 0 : required_count - 1);
+        external_aim_transforms = buffer_view;
+    }
+
+    void unbind_aim_transforms() { external_aim_transforms = {}; }
+
+    bool has_bound_aim_transforms() const
+    {
+        return external_aim_transforms.operator bool();
+    }
 };
+
+void SoftTransformConstraintAccessorFeatureOverrider::do_bind_aim_transforms(backend::BufferView buffer_view)
+{
+    m_constraint.bind_aim_transforms(buffer_view);
+}
+
+void SoftTransformConstraintAccessorFeatureOverrider::do_unbind_aim_transforms()
+{
+    m_constraint.unbind_aim_transforms();
+}
+
+bool SoftTransformConstraintAccessorFeatureOverrider::do_has_bound_aim_transforms() const
+{
+    return m_constraint.has_bound_aim_transforms();
+}
 
 REGISTER_SIM_SYSTEM(SoftTransformConstraint);
 }  // namespace uipc::backend::cuda

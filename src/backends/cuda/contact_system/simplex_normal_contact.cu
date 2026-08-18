@@ -333,6 +333,11 @@ class SimplexNormalContactPTExporter final : public ContactExporter
 
     std::string_view get_prim_type() const noexcept override { return "PT+N"; }
 
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override
+    {
+        return make_contact_gradient_device_view(simplex_normal_contact->PT_gradients());
+    }
+
     void do_build(BuildInfo& info) override
     {
         simplex_normal_contact =
@@ -427,6 +432,11 @@ class SimplexNormalContactEEExporter final : public ContactExporter
 
     std::string_view get_prim_type() const noexcept override { return "EE+N"; }
 
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override
+    {
+        return make_contact_gradient_device_view(simplex_normal_contact->EE_gradients());
+    }
+
     void do_build(BuildInfo& info) override
     {
         simplex_normal_contact =
@@ -519,6 +529,11 @@ class SimplexNormalContactPEExporter final : public ContactExporter
     SimSystemSlot<SimplexNormalContact> simplex_normal_contact;
 
     std::string_view get_prim_type() const noexcept override { return "PE+N"; }
+
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override
+    {
+        return make_contact_gradient_device_view(simplex_normal_contact->PE_gradients());
+    }
 
     void do_build(BuildInfo& info) override
     {
@@ -614,6 +629,11 @@ class SimplexNormalContactPPExporter final : public ContactExporter
     SimSystemSlot<SimplexNormalContact> simplex_normal_contact;
 
     std::string_view get_prim_type() const noexcept override { return "PP+N"; }
+
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override
+    {
+        return make_contact_gradient_device_view(simplex_normal_contact->PP_gradients());
+    }
 
     void do_build(BuildInfo& info) override
     {

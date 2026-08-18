@@ -45,6 +45,13 @@ void ContactSystemFeature::contact_hessian(const constitution::IConstitution& c,
     m_impl->get_contact_hessian(uid_str, vert_hess);
 }
 
+ContactGradientDeviceView ContactSystemFeature::contact_gradient_device_view(std::string_view prim_type)
+{
+    auto result = m_impl->get_contact_gradient_device_view(prim_type);
+    UIPC_ASSERT_THROW(result, "Contact primitive '{}' does not expose a device gradient view.", prim_type);
+    return result;
+}
+
 vector<std::string> ContactSystemFeature::contact_primitive_types() const
 {
     return m_impl->get_contact_primitive_types();

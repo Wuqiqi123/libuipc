@@ -17,6 +17,7 @@ class ContactSystemFeatureOverrider final : public core::ContactSystemFeatureOve
     void get_contact_gradient(std::string_view prim_type, geometry::Geometry& vert_grad) override;
     void get_contact_hessian(std::string_view prim_type, geometry::Geometry& vert_hess) override;
     void get_contact_energy(std::string_view prim_type, geometry::Geometry& prims) override;
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override;
 
     SimSystemSlot<ContactExporterManager> m_manager;
 };

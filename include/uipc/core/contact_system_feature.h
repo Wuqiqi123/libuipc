@@ -6,6 +6,18 @@
 
 namespace uipc::core
 {
+struct UIPC_CORE_API ContactGradientDeviceView
+{
+    backend::BufferView vertex_indices;
+    backend::BufferView gradients;
+    bool                supported = false;
+
+    explicit operator bool() const noexcept
+    {
+        return supported && vertex_indices.size() == gradients.size();
+    }
+};
+
 class UIPC_CORE_API ContactSystemFeatureOverrider
 {
   public:
@@ -17,6 +29,8 @@ class UIPC_CORE_API ContactSystemFeatureOverrider
 
     virtual void get_contact_hessian(std::string_view    prim_type,
                                      geometry::Geometry& vert_hess) = 0;
+
+    virtual ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) = 0;
 
 
     virtual vector<std::string> get_contact_primitive_types() const = 0;
@@ -40,6 +54,14 @@ class UIPC_CORE_API ContactSystemFeature final : public Feature
     void contact_gradient(const constitution::IConstitution& c, geometry::Geometry& vert_grad);
 
     void contact_hessian(const constitution::IConstitution& c, geometry::Geometry& vert_hess);
+
+    /**
+     * @brief Return a read-only device view of the current contact gradient.
+     *
+     * The returned buffers contain IndexT and Vector3 values and remain valid
+     * only until the next World advance or recover operation.
+     */
+    ContactGradientDeviceView contact_gradient_device_view(std::string_view prim_type);
 
     vector<std::string> contact_primitive_types() const;
 

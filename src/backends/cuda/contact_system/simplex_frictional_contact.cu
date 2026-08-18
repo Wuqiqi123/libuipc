@@ -338,6 +338,11 @@ class SimplexFrictionalContactPTExporter final : public ContactExporter
 
     std::string_view get_prim_type() const noexcept override { return "PT+F"; }
 
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override
+    {
+        return make_contact_gradient_device_view(simplex_frictional_contact->PT_gradients());
+    }
+
     void do_build(BuildInfo& info) override
     {
         simplex_frictional_contact =
@@ -430,6 +435,11 @@ class SimplexFrictionalContactEEExporter final : public ContactExporter
 
     std::string_view get_prim_type() const noexcept override { return "EE+F"; }
 
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override
+    {
+        return make_contact_gradient_device_view(simplex_frictional_contact->EE_gradients());
+    }
+
     void do_build(BuildInfo& info) override
     {
         simplex_frictional_contact =
@@ -520,6 +530,11 @@ class SimplexFrictionalContactPEExporter final : public ContactExporter
     SimSystemSlot<SimplexFrictionalContact> simplex_frictional_contact;
 
     std::string_view get_prim_type() const noexcept override { return "PE+F"; }
+
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override
+    {
+        return make_contact_gradient_device_view(simplex_frictional_contact->PE_gradients());
+    }
 
     void do_build(BuildInfo& info) override
     {
@@ -612,6 +627,11 @@ class SimplexFrictionalContactPPExporter final : public ContactExporter
     SimSystemSlot<SimplexFrictionalContact> simplex_frictional_contact;
 
     std::string_view get_prim_type() const noexcept override { return "PP+F"; }
+
+    core::ContactGradientDeviceView get_contact_gradient_device_view(std::string_view prim_type) override
+    {
+        return make_contact_gradient_device_view(simplex_frictional_contact->PP_gradients());
+    }
 
     void do_build(BuildInfo& info) override
     {
