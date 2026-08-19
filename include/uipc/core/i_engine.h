@@ -20,6 +20,8 @@ class UIPC_CORE_API IEngine
 
     bool                     dump();
     bool                     recover(SizeT dst_frame);
+    bool                     dump_memory();
+    bool                     recover_memory(SizeT dst_frame);
     SizeT                    frame() const;
     EngineStatusCollection&  status();
     const FeatureCollection& features() const;
@@ -34,6 +36,8 @@ class UIPC_CORE_API IEngine
     virtual Json                     do_to_json() const;
     virtual bool                     do_dump();
     virtual bool                     do_recover(SizeT dst_frame);
+    virtual bool                     do_dump_memory();
+    virtual bool                     do_recover_memory(SizeT dst_frame);
     virtual SizeT                    get_frame() const    = 0;
     virtual EngineStatusCollection&  get_status()         = 0;
     virtual const FeatureCollection& get_features() const = 0;

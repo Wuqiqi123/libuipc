@@ -17,11 +17,23 @@ class LinearFusedPCG : public IterativeSolver
   protected:
     virtual void do_build(BuildInfo& info) override;
     virtual void do_solve(GlobalLinearSystem::SolvingInfo& info) override;
+    virtual void do_set_tolerance_rate(Float tolerance_rate) override;
+    virtual Float do_tolerance_rate() const override;
 
   private:
     using DeviceDenseVector = muda::DeviceDenseVector<Float>;
 
-    SizeT fused_pcg(muda::DenseVectorView<Float> x, muda::CDenseVectorView<Float> b, SizeT max_iter);
+    struct SolveResult
+    {
+        SizeT iterations       = 0;
+        Float initial_residual = 0.0;
+        Float final_residual   = 0.0;
+        bool  converged        = true;
+    };
+
+    SolveResult fused_pcg(muda::DenseVectorView<Float> x,
+                          muda::CDenseVectorView<Float> b,
+                          SizeT                         max_iter);
     void check_init_rz_nan_inf(Float rz);
     void check_iter_rz_nan_inf(Float rz, SizeT k);
 
@@ -34,6 +46,7 @@ class LinearFusedPCG : public IterativeSolver
     muda::DeviceVar<Float>  d_pAp;
     muda::DeviceVar<Float>  d_rz_new;
     muda::DeviceVar<IndexT> d_converged;
+    muda::DeviceVar<IndexT> d_breakdown;
 
     Float max_iter_ratio  = 2.0;
     Float global_tol_rate = 1e-4;

@@ -89,6 +89,29 @@ void GlobalLinearSystem::solve()
     m_impl.distribute_solution();
 }
 
+void GlobalLinearSystem::reset_frame_diagnostics() noexcept
+{
+    m_last_iteration_count      = 0;
+    m_frame_iteration_count     = 0;
+    m_frame_max_iteration_count = 0;
+    m_last_relative_residual    = 0.0;
+    m_last_solve_converged      = true;
+}
+
+void GlobalLinearSystem::set_tolerance_rate(Float tolerance_rate)
+{
+    UIPC_ASSERT(m_impl.iterative_solver,
+                "GlobalLinearSystem has no iterative solver");
+    m_impl.iterative_solver->set_tolerance_rate(tolerance_rate);
+}
+
+Float GlobalLinearSystem::tolerance_rate() const
+{
+    UIPC_ASSERT(m_impl.iterative_solver,
+                "GlobalLinearSystem has no iterative solver");
+    return m_impl.iterative_solver->tolerance_rate();
+}
+
 Float GlobalLinearSystem::diag_norm()
 {
     m_impl.build_linear_system();
@@ -430,6 +453,16 @@ void GlobalLinearSystem::Impl::solve_linear_system()
         info.m_b = b.cview();
         info.m_x = x.view();
         iterative_solver->solve(info);
+        auto& owner = *static_cast<GlobalLinearSystem*>(this->iterative_solver->m_system);
+        owner.m_last_iteration_count = info.m_iter_count;
+        owner.m_frame_iteration_count += info.m_iter_count;
+        owner.m_frame_max_iteration_count =
+            std::max(owner.m_frame_max_iteration_count, info.m_iter_count);
+        owner.m_last_relative_residual =
+            info.m_initial_residual > 0.0
+                ? std::abs(info.m_final_residual) / std::abs(info.m_initial_residual)
+                : 0.0;
+        owner.m_last_solve_converged = info.m_converged;
         logger::info("Iterative linear solver iteration count: {}", info.m_iter_count);
     }
 }

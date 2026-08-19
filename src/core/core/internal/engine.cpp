@@ -158,6 +158,18 @@ class Engine::Impl
         return m_engine->recover(dst_frame);
     }
 
+    bool do_dump_memory()
+    {
+        LogPatternGuard guard{backend_name()};
+        return m_engine->dump_memory();
+    }
+
+    bool do_recover_memory(SizeT dst_frame)
+    {
+        LogPatternGuard guard{backend_name()};
+        return m_engine->recover_memory(dst_frame);
+    }
+
     SizeT get_frame() const
     {
         LogPatternGuard guard{backend_name()};
@@ -305,6 +317,14 @@ bool Engine::dump()
 bool Engine::recover(SizeT dst_frame)
 {
     return m_impl->do_recover(dst_frame);
+}
+bool Engine::dump_memory()
+{
+    return m_impl->do_dump_memory();
+}
+bool Engine::recover_memory(SizeT dst_frame)
+{
+    return m_impl->do_recover_memory(dst_frame);
 }
 SizeT Engine::frame() const
 {

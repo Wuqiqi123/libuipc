@@ -107,6 +107,10 @@ class SimEngine : public core::IEngine
     virtual void do_init(core::internal::World& v) final override;
     virtual bool do_recover(SizeT dst_frame) final override;
     virtual bool do_dump() final override;
+    virtual bool do_recover_memory(SizeT dst_frame) final override;
+    virtual bool do_dump_memory() final override;
+    bool         dump_system_state(const Json& config);
+    bool         recover_system_state(SizeT dst_frame, const Json& config);
     ISimSystem*  find_system(ISimSystem* ptr);
     ISimSystem*  require_system(ISimSystem* ptr);
     virtual core::EngineStatusCollection&  get_status() final override;
@@ -117,6 +121,8 @@ class SimEngine : public core::IEngine
     std::string                  m_workspace;
     core::EngineStatusCollection m_status;
     core::FeatureCollection      m_features;
+    SizeT                        m_memory_dump_frame{~0ull};
+    bool                         m_has_memory_dump{false};
 };
 
 class SimEngineException : public Exception

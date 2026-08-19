@@ -219,12 +219,14 @@ void SimEngine::advance()
     {
         if(line_search_iter_after_loop >= m_line_searcher->max_iter())
         {
+            m_solver_diagnostics.failure_kind =
+                core::SolverFailureKind::LineSearchLimit;
             logger::warn("Line Search Exits with Max Iteration: {} (Frame={}, Newton={})",
                          m_line_searcher->max_iter(),
                          m_current_frame,
                          m_newton_iter);
 
-            if(m_strict_mode->view()[0])
+            if(m_solver_runtime_options.strict_mode)
             {
                 throw SimEngineException("StrictMode: Line Search Exits with Max Iteration");
             }
@@ -233,20 +235,24 @@ void SimEngine::advance()
 
     auto check_newton_iter = [this](IndexT newton_iter_after_loop)
     {
-        auto newton_max = m_newton_max_iter->view()[0];
+        auto newton_max = m_solver_runtime_options.newton_max_iterations;
         if(newton_iter_after_loop >= newton_max)
         {
+            m_solver_diagnostics.failure_kind =
+                core::SolverFailureKind::NewtonLimit;
+            m_solver_diagnostics.newton_converged = false;
             logger::warn("Newton Iteration Exits with Max Iteration: {} (Frame={})",
                          newton_max,
                          m_current_frame);
 
-            if(m_strict_mode->view()[0])
+            if(m_solver_runtime_options.strict_mode)
             {
                 throw SimEngineException("StrictMode: Newton Iteration Exits with Max Iteration");
             }
         }
         else
         {
+            m_solver_diagnostics.newton_converged = true;
             logger::info("Newton Iteration Converged with Iteration Count: {}, Bound: [{}, {}]",
                          newton_iter_after_loop,
                          m_newton_min_iter->view()[0],
@@ -263,12 +269,19 @@ void SimEngine::advance()
         Timer timer{"Pipeline"};
 
         ++m_current_frame;
+        m_solver_diagnostics = {};
+        m_solver_diagnostics.frame = m_current_frame;
+        m_solver_diagnostics.strict_mode = m_solver_runtime_options.strict_mode;
+        m_solver_diagnostics.minimum_step_length = 1.0;
+        m_solver_diagnostics.linear_system_converged = true;
+        m_global_linear_system->reset_frame_diagnostics();
 
         logger::info(R"(>>> Begin Frame: {})", m_current_frame);
 
         // Rebuild Scene
         {
             Timer timer{"Rebuild Scene"};
+            m_solver_diagnostics.stage = core::SolverPipelineStage::RebuildScene;
             // Trigger the rebuild_scene event, systems register their actions will be called here
             m_state = SimEngineState::RebuildScene;
             {
@@ -301,6 +314,7 @@ void SimEngine::advance()
 
             // 2. Predict Motion => x_tilde = x + v * dt
             m_state = SimEngineState::PredictMotion;
+            m_solver_diagnostics.stage = core::SolverPipelineStage::PredictMotion;
             // MUST step animation before predicting dof
             // some animation may provide information for DOF prediction
             step_animation();
@@ -313,7 +327,7 @@ void SimEngine::advance()
             // 4. Nonlinear-Newton Iteration
             m_newton_tolerance_manager->pre_newton(m_current_frame);
 
-            auto newton_max_iter = m_newton_max_iter->view()[0];
+            auto newton_max_iter = m_solver_runtime_options.newton_max_iterations;
             auto newton_min_iter = m_newton_min_iter->view()[0];
             beta                 = 1.0;
             IndexT newton_iter   = 0;
@@ -321,6 +335,7 @@ void SimEngine::advance()
             {
                 Timer timer{"Newton Iteration"};
                 m_newton_iter = newton_iter;
+                m_solver_diagnostics.newton_iterations = newton_iter + 1;
 
                 // 1) Compute animation substep ratio
                 compute_animation_substep_ratio(newton_iter);
@@ -335,14 +350,36 @@ void SimEngine::advance()
                 //    - Contact Effect
                 //    - Other DyTopo Effects
                 m_state = SimEngineState::ComputeDyTopoEffect;
+                m_solver_diagnostics.stage =
+                    core::SolverPipelineStage::ComputeDyTopoEffect;
                 compute_dytopo_effect();
 
 
                 // 4) Solve Global Linear System => dx = A^-1 * b
                 m_state = SimEngineState::SolveGlobalLinearSystem;
+                m_solver_diagnostics.stage =
+                    core::SolverPipelineStage::SolveGlobalLinearSystem;
                 {
                     Timer timer{"Solve Global Linear System"};
                     m_global_linear_system->solve();
+                }
+                m_solver_diagnostics.pcg_iterations_last =
+                    m_global_linear_system->last_iteration_count();
+                m_solver_diagnostics.pcg_iterations_total =
+                    m_global_linear_system->frame_iteration_count();
+                m_solver_diagnostics.pcg_iterations_max =
+                    m_global_linear_system->frame_max_iteration_count();
+                m_solver_diagnostics.pcg_relative_residual =
+                    m_global_linear_system->last_relative_residual();
+                m_solver_diagnostics.linear_system_converged =
+                    m_global_linear_system->last_solve_converged();
+                if(m_solver_runtime_options.strict_mode
+                   && !m_solver_diagnostics.linear_system_converged)
+                {
+                    m_solver_diagnostics.failure_kind =
+                        core::SolverFailureKind::LinearSystemLimit;
+                    throw SimEngineException(
+                        "StrictMode: linear solver did not reach its tolerance");
                 }
 
 
@@ -351,6 +388,7 @@ void SimEngine::advance()
 
                 // 7) Begin Line Search
                 m_state = SimEngineState::LineSearch;
+                m_solver_diagnostics.stage = core::SolverPipelineStage::LineSearch;
                 {
                     Timer timer{"Line Search"};
 
@@ -411,6 +449,14 @@ void SimEngine::advance()
                     }
 
                     // Check Line Search Iteration: report warnings or throw exceptions if needed
+                    m_solver_diagnostics.line_search_iterations_total +=
+                        line_search_iter;
+                    m_solver_diagnostics.line_search_iterations_max =
+                        std::max(m_solver_diagnostics.line_search_iterations_max,
+                                 line_search_iter);
+                    m_solver_diagnostics.minimum_step_length =
+                        std::min(m_solver_diagnostics.minimum_step_length,
+                                 alpha);
                     check_line_search_iter(line_search_iter);
 
                     bool terminated = converged && (newton_iter >= newton_min_iter);
@@ -419,18 +465,22 @@ void SimEngine::advance()
                 }
             }
 
+            // Reject an unconverged frame before committing velocity/history.
+            check_newton_iter(newton_iter);
+
             // 5. Update Velocity => v = (x - x_0) / dt
             m_state = SimEngineState::UpdateVelocity;
+            m_solver_diagnostics.stage = core::SolverPipelineStage::UpdateVelocity;
             {
                 Timer timer{"Update Velocity"};
                 m_time_integrator_manager->update_state();
             }
 
-            // Check Newton Iteration
-            // report warnings or throw exceptions if needed
-            check_newton_iter(newton_iter);
         }
 
+        m_solver_diagnostics.failure_kind = core::SolverFailureKind::None;
+        m_solver_diagnostics.failure_message.clear();
+        m_solver_diagnostics.stage = core::SolverPipelineStage::None;
         logger::info("<<< End Frame: {}", m_current_frame);
     };
 
@@ -440,12 +490,29 @@ void SimEngine::advance()
     }
     catch(const SimEngineException& e)
     {
+        if(m_solver_diagnostics.failure_kind == core::SolverFailureKind::None)
+        {
+            m_solver_diagnostics.failure_kind =
+                m_state == SimEngineState::SolveGlobalLinearSystem
+                    ? core::SolverFailureKind::LinearSystemBreakdown
+                    : core::SolverFailureKind::Unexpected;
+            if(std::string_view{e.what()}.find("NaN") != std::string_view::npos
+               || std::string_view{e.what()}.find("non-finite")
+                      != std::string_view::npos)
+            {
+                m_solver_diagnostics.failure_kind =
+                    core::SolverFailureKind::NonFinite;
+            }
+        }
+        m_solver_diagnostics.failure_message = e.what();
         logger::error("Engine Advance Error: {}", e.what());
         status().push_back(core::EngineStatus::error(e.what()));
     }
     catch(const std::exception& e)
     {
         const auto message = fmt::format("Unexpected Exception: {}", e.what());
+        m_solver_diagnostics.failure_kind = core::SolverFailureKind::Unexpected;
+        m_solver_diagnostics.failure_message = message;
         logger::error("Engine Advance Error: {}", message);
         status().push_back(core::EngineStatus::error(message));
     }

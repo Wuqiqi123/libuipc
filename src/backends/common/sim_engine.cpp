@@ -192,38 +192,50 @@ bool SimEngine::do_dump()
         if(!success)
             return false;
 
-        // 1.2 Let the subclass to dump
-        try
-        {
-            DumpInfo dump_info{frame(), workspace(), Json::object()};
-            success = do_dump(dump_info);
-        }
-        catch(std::exception e)
-        {
-            logger::error("Failed to dump engine. Reason: {}", e.what());
-            success = false;
-        }
-
-        if(!success)
-            return false;
     }
 
+    return dump_system_state(Json::object());
+}
 
-    // 2. Dump subsystems
-    bool all_success = true;
+bool SimEngine::do_dump_memory()
+{
+    m_has_memory_dump = false;
+    const Json config = {{"memory_only", true}};
+    if(!dump_system_state(config))
+        return false;
+    m_memory_dump_frame = frame();
+    m_has_memory_dump   = true;
+    return true;
+}
+
+bool SimEngine::dump_system_state(const Json& config)
+{
+    bool success = true;
+    try
+    {
+        DumpInfo dump_info{frame(), workspace(), config};
+        success = do_dump(dump_info);
+    }
+    catch(const std::exception& e)
+    {
+        logger::error("Failed to dump engine. Reason: {}", e.what());
+        success = false;
+    }
+
+    if(!success)
+        return false;
+
     for(auto system : systems())
     {
-        ISimSystem::DumpInfo info{frame(), workspace(), Json::object()};
-        all_success &= system->do_dump(info);
-
-        if(!all_success)
+        ISimSystem::DumpInfo info{frame(), workspace(), config};
+        if(!system->do_dump(info))
         {
             logger::error("Failed to dump system [{}]", system->name());
-            break;
+            return false;
         }
     }
 
-    return all_success;
+    return true;
 }
 
 void SimEngine::do_init(core::internal::World& w)
@@ -317,49 +329,68 @@ bool SimEngine::do_recover(SizeT dst_frame)
         }
     }
 
-    bool all_success = true;
+    const bool all_success =
+        recover_system_state(try_recover_frame, Json::object());
+
+    if(all_success)
     {
-        RecoverInfo engine_recover_info{try_recover_frame, workspace(), Json::object()};
-        ISimSystem::RecoverInfo simsystem_recover_info{
-            try_recover_frame, workspace(), Json::object()};
+        logger::info("Successfully recovered to frame {}", try_recover_frame);
+    }
 
-        all_success &= this->do_try_recover(engine_recover_info);
-        if(!all_success)
+    return all_success;
+}
+
+bool SimEngine::do_recover_memory(SizeT dst_frame)
+{
+    if(!m_has_memory_dump || dst_frame != m_memory_dump_frame)
+    {
+        logger::warn("No in-memory dump for frame {} (cached frame={}).",
+                     dst_frame,
+                     m_has_memory_dump ? m_memory_dump_frame : ~0ull);
+        return false;
+    }
+
+    const Json config = {{"memory_only", true}};
+    return recover_system_state(dst_frame, config);
+}
+
+bool SimEngine::recover_system_state(SizeT dst_frame, const Json& config)
+{
+    bool all_success = true;
+    RecoverInfo engine_recover_info{dst_frame, workspace(), config};
+    ISimSystem::RecoverInfo simsystem_recover_info{
+        dst_frame, workspace(), config};
+
+    all_success = this->do_try_recover(engine_recover_info);
+    if(!all_success)
+    {
+        logger::warn("Try recovering engine fails, so skip recovery.");
+    }
+    else
+    {
+        for(auto system : systems())
         {
-            logger::warn("Try recovering engine fails, so skip recovery.");
-        }
-        else
-        {
-            for(auto system : systems())
+            if(!system->try_recover(simsystem_recover_info))
             {
-                all_success &= system->try_recover(simsystem_recover_info);
-
-                if(!all_success)
-                {
-                    logger::warn("Try recovering system [{}] fails, so skip recovery.",
-                                 system->name());
-                    break;
-                }
+                logger::warn("Try recovering system [{}] fails, so skip recovery.",
+                             system->name());
+                all_success = false;
+                break;
             }
-        }
-
-        if(all_success)  // If all success, apply recover
-        {
-            this->do_apply_recover(engine_recover_info);
-            for(auto system : systems())
-                system->apply_recover(simsystem_recover_info);
-        }
-        else  // If any fails, clear all recover
-        {
-            this->do_clear_recover(engine_recover_info);
-            for(auto system : systems())
-                system->clear_recover(simsystem_recover_info);
         }
     }
 
     if(all_success)
     {
-        logger::info("Successfully recovered to frame {}", try_recover_frame);
+        this->do_apply_recover(engine_recover_info);
+        for(auto system : systems())
+            system->apply_recover(simsystem_recover_info);
+    }
+    else
+    {
+        this->do_clear_recover(engine_recover_info);
+        for(auto system : systems())
+            system->clear_recover(simsystem_recover_info);
     }
 
     return all_success;

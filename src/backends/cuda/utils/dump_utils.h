@@ -14,6 +14,7 @@ class BufferDump
     static_assert(magic_number < ~0ull, "Magic number is too large");
 
     std::vector<std::byte> byte_buffer;
+    bool                   cache_valid = false;
 
   public:
     BufferDump() = default;
@@ -22,6 +23,7 @@ class BufferDump
     {
         byte_buffer.clear();
         byte_buffer.shrink_to_fit();
+        cache_valid = false;
     }
 
     template <typename T>
@@ -42,6 +44,7 @@ class BufferDump
         std::size_t size_bytes = buffer.size() * sizeof(T);
         byte_buffer.resize(size_bytes);
         std::memcpy(byte_buffer.data(), buffer.data(), size_bytes);
+        cache_valid = true;
         return dump_(path);
     };
 
@@ -56,6 +59,7 @@ class BufferDump
         std::size_t size_bytes = buffer.size() * sizeof(T);
         byte_buffer.resize(size_bytes);
         buffer.copy_to((T*)byte_buffer.data());
+        cache_valid = true;
         return dump_(path);
     }
 
@@ -70,6 +74,7 @@ class BufferDump
         std::size_t size_bytes = buffer.size() * sizeof(T);
         byte_buffer.resize(size_bytes);
         buffer.view().copy_to((T*)byte_buffer.data());
+        cache_valid = true;
         return dump_(path);
     }
 
@@ -109,6 +114,9 @@ class BufferDump
   private:
     bool dump_(std::string_view path)
     {
+        if(path.starts_with("memory://"))
+            return cache_valid;
+
         auto size_bytes = byte_buffer.size();
 
         std::ofstream ofs(std::string{path}, std::ios::binary);
@@ -133,6 +141,9 @@ class BufferDump
 
     bool load_(std::string_view path)
     {
+        if(path.starts_with("memory://"))
+            return cache_valid;
+
         std::ifstream ifs(std::string{path}, std::ios::binary);
         if(!ifs.is_open())
         {
@@ -157,7 +168,14 @@ class BufferDump
         byte_buffer.resize(size_bytes);
         ifs.read((char*)byte_buffer.data(), size_bytes);
 
+        if(!ifs)
+        {
+            cache_valid = false;
+            return false;
+        }
+
         ifs.close();
+        cache_valid = true;
         return true;
     }
 };

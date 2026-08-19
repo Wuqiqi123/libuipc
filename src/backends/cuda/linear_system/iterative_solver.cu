@@ -53,4 +53,24 @@ void IterativeSolver::solve(GlobalLinearSystem::SolvingInfo& info)
 {
     do_solve(info);
 }
+
+void IterativeSolver::do_set_tolerance_rate(Float)
+{
+    throw SimEngineException("iterative solver does not support a runtime tolerance");
+}
+
+Float IterativeSolver::do_tolerance_rate() const
+{
+    return 0.0;
+}
+
+void IterativeSolver::set_tolerance_rate(Float tolerance_rate)
+{
+    do_set_tolerance_rate(tolerance_rate);
+}
+
+Float IterativeSolver::tolerance_rate() const
+{
+    return do_tolerance_rate();
+}
 }  // namespace uipc::backend::cuda

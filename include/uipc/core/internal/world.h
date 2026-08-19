@@ -20,6 +20,8 @@ class UIPC_CORE_API World final : public std::enable_shared_from_this<World>
     void retrieve();
     bool dump();
     bool recover(SizeT aim_frame = ~0ull);
+    bool dump_memory();
+    bool recover_memory(SizeT aim_frame);
     bool is_valid() const;
 
     SizeT frame() const;

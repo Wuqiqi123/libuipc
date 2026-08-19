@@ -4,6 +4,8 @@
 #include <sim_engine_state.h>
 #include <backends/common/sim_engine.h>
 #include <sim_action_collection.h>
+#include <uipc/core/solver_control_feature.h>
+#include <uipc/core/solver_diagnostics_feature.h>
 
 namespace uipc::backend::cuda
 {
@@ -48,6 +50,10 @@ class SimEngine final : public backend::SimEngine
 
     SizeT newton_iter() const noexcept;
     SizeT line_search_iter() const noexcept;
+
+    core::SolverDiagnostics solver_diagnostics() const;
+    core::SolverRuntimeOptions solver_runtime_options() const;
+    void set_solver_runtime_options(const core::SolverRuntimeOptions& options);
 
   private:
     virtual void  do_init(InitInfo& info) override;
@@ -112,6 +118,9 @@ class SimEngine final : public backend::SimEngine
     SizeT m_current_frame    = 0;
     SizeT m_newton_iter      = 0;
     SizeT m_line_search_iter = 0;
+
+    core::SolverDiagnostics    m_solver_diagnostics;
+    core::SolverRuntimeOptions m_solver_runtime_options;
 
     bool  m_semi_implicit_enabled  = true;
     Float m_semi_implicit_beta_tol = 1e-3;

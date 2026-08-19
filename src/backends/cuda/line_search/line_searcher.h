@@ -47,6 +47,7 @@ class LineSearcher : public SimSystem
 
   private:
     friend class SimEngine;
+    void  set_max_iter(SizeT max_iter);
     void  init();                           // only be called by SimEngine
     void  record_start_point();             // only be called by SimEngine
     void  step_forward(Float alpha);        // only be called by SimEngine

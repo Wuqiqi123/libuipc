@@ -38,6 +38,9 @@ class UIPC_CORE_API World final
     void retrieve();
     bool dump();
     bool recover(SizeT aim_frame = ~0ull);
+    // Runtime-only checkpoint. It avoids filesystem I/O and retains one slot.
+    bool dump_memory();
+    bool recover_memory(SizeT aim_frame);
     bool is_valid() const;
 
     SizeT frame() const;

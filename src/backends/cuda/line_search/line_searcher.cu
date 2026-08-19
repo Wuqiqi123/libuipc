@@ -128,4 +128,11 @@ SizeT LineSearcher::max_iter() const noexcept
 {
     return m_max_iter;
 }
+
+void LineSearcher::set_max_iter(SizeT max_iter)
+{
+    if(max_iter == 0)
+        throw SimEngineException("line-search maximum iterations must be positive");
+    m_max_iter = max_iter;
+}
 }  // namespace uipc::backend::cuda

@@ -54,6 +54,16 @@ bool World::recover(SizeT aim_frame)
     return m_internal->recover(aim_frame);
 }
 
+bool World::dump_memory()
+{
+    return m_internal->dump_memory();
+}
+
+bool World::recover_memory(SizeT aim_frame)
+{
+    return m_internal->recover_memory(aim_frame);
+}
+
 bool World::is_valid() const
 {
     return m_internal->is_valid();

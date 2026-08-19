@@ -38,6 +38,16 @@ bool IEngine::recover(SizeT dst_frame)
     return do_recover(dst_frame);
 }
 
+bool IEngine::dump_memory()
+{
+    return do_dump_memory();
+}
+
+bool IEngine::recover_memory(SizeT dst_frame)
+{
+    return do_recover_memory(dst_frame);
+}
+
 SizeT IEngine::frame() const
 {
     return get_frame();
@@ -68,6 +78,16 @@ bool IEngine::do_dump()
 bool IEngine::do_recover(SizeT dst_frame)
 {
     return true;
+}
+
+bool IEngine::do_dump_memory()
+{
+    return false;
+}
+
+bool IEngine::do_recover_memory(SizeT dst_frame)
+{
+    return false;
 }
 
 void IEngine::insert_sanity_checkers(ISanityCheckerCollection& collection)

@@ -8,6 +8,8 @@
 #include <uipc/common/timer.h>
 #include <backends/common/backend_path_tool.h>
 #include <uipc/backend/engine_create_info.h>
+#include <line_search/line_searcher.h>
+#include <linear_system/global_linear_system.h>
 
 namespace uipc::backend::cuda
 {
@@ -208,6 +210,9 @@ void SimEngine::do_apply_recover(RecoverInfo& info)
 {
     // If success, set the current frame to the recovered frame
     m_current_frame = info.frame();
+    m_solver_diagnostics.frame = m_current_frame;
+    m_solver_diagnostics.stage = core::SolverPipelineStage::None;
+    m_solver_diagnostics.recovered = true;
 }
 
 void SimEngine::do_clear_recover(RecoverInfo& info)
@@ -228,5 +233,33 @@ SizeT SimEngine::newton_iter() const noexcept
 SizeT SimEngine::line_search_iter() const noexcept
 {
     return m_line_search_iter;
+}
+
+core::SolverDiagnostics SimEngine::solver_diagnostics() const
+{
+    return m_solver_diagnostics;
+}
+
+core::SolverRuntimeOptions SimEngine::solver_runtime_options() const
+{
+    return m_solver_runtime_options;
+}
+
+void SimEngine::set_solver_runtime_options(
+    const core::SolverRuntimeOptions& options)
+{
+    if(options.newton_max_iterations == 0
+       || options.line_search_max_iterations == 0
+       || !std::isfinite(options.linear_system_tolerance_rate)
+       || options.linear_system_tolerance_rate <= 0.0)
+    {
+        throw SimEngineException("invalid runtime solver options");
+    }
+
+    m_line_searcher->set_max_iter(options.line_search_max_iterations);
+    m_global_linear_system->set_tolerance_rate(
+        options.linear_system_tolerance_rate);
+    m_solver_runtime_options = options;
+    m_solver_diagnostics.strict_mode = options.strict_mode;
 }
 }  // namespace uipc::backend::cuda

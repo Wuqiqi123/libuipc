@@ -19,6 +19,7 @@
 #include <active_set_system/global_active_set_manager.h>
 #include <pipeline/ipc_pipeline_flag.h>
 #include <pipeline/al_ipc_pipeline_flag.h>
+#include <engine/solver_feature.h>
 
 namespace uipc::backend::cuda
 {
@@ -52,6 +53,14 @@ void SimEngine::build()
 
     // Augmented Lagrangian Pipeline Systems
     m_global_active_set_manager = find<GlobalActiveSetManager>();
+
+    auto solver_overrider = std::make_shared<SolverFeatureOverrider>(this);
+    features().insert(std::make_shared<core::SolverDiagnosticsFeature>(
+        std::static_pointer_cast<core::SolverDiagnosticsFeatureOverrider>(
+            solver_overrider)));
+    features().insert(std::make_shared<core::SolverControlFeature>(
+        std::static_pointer_cast<core::SolverControlFeatureOverrider>(
+            solver_overrider)));
 
 
     // 3) dump system info
@@ -131,6 +140,15 @@ void SimEngine::init_scene()
         m_time_integrator_manager->init();
         m_newton_tolerance_manager->init();
     }
+
+    m_solver_runtime_options.newton_max_iterations =
+        static_cast<SizeT>(m_newton_max_iter->view()[0]);
+    m_solver_runtime_options.line_search_max_iterations =
+        m_line_searcher->max_iter();
+    m_solver_runtime_options.linear_system_tolerance_rate =
+        m_global_linear_system->tolerance_rate();
+    m_solver_runtime_options.strict_mode = m_strict_mode->view()[0] != 0;
+    m_solver_diagnostics.strict_mode = m_solver_runtime_options.strict_mode;
 
     // 3.2 Backwards (if needed)
     {

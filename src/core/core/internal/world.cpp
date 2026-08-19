@@ -146,13 +146,12 @@ bool World::recover(SizeT aim_frame)
         return false;
     }
 
-    if(!m_valid)
-    {
-        logger::error("World is not valid, skipping recover.");
-        return false;
-    }
-
     auto engine = lock(m_engine);
+
+    // Recovery is specifically allowed after an advance error invalidates the
+    // world. Preserve backend diagnostics, but clear the sticky engine status
+    // so the recovery operation can establish a new validity result.
+    engine->status().clear();
 
     bool success   = engine->recover(aim_frame);
     bool has_error = engine->status().has_error();
@@ -165,13 +164,65 @@ bool World::recover(SizeT aim_frame)
 
     if(success && !has_error)
     {
+        m_valid = true;
         // if diff_sim is not empty, broadcast parameters
         auto& diff_sim = m_scene->diff_sim();
         if(diff_sim.parameters().size() > 0)
             diff_sim.parameters().broadcast();
     }
 
+    if(!success)
+        m_valid = false;
+
+    return m_valid;
+}
+
+bool World::dump_memory()
+{
+    if(!m_valid)
+    {
+        logger::error("World is not valid, skipping in-memory dump.");
+        return false;
+    }
+
+    auto engine = lock(m_engine);
+
+    bool success   = engine->dump_memory();
+    bool has_error = engine->status().has_error();
+    if(has_error)
+    {
+        logger::error("Engine has error after in-memory dump, world becomes invalid.");
+        m_valid = false;
+    }
+
     return success && !has_error;
+}
+
+bool World::recover_memory(SizeT aim_frame)
+{
+    if(!m_scene)
+    {
+        logger::warn("Scene has not been set, skipping in-memory recover.");
+        return false;
+    }
+
+    auto engine = lock(m_engine);
+
+    engine->status().clear();
+    bool success   = engine->recover_memory(aim_frame);
+    bool has_error = engine->status().has_error();
+
+    m_valid = success && !has_error;
+    if(!m_valid)
+    {
+        logger::error("Engine could not recover its in-memory checkpoint.");
+        return false;
+    }
+
+    auto& diff_sim = m_scene->diff_sim();
+    if(diff_sim.parameters().size() > 0)
+        diff_sim.parameters().broadcast();
+    return true;
 }
 
 bool World::is_valid() const

@@ -45,6 +45,8 @@ class UIPC_CORE_API Engine final : public std::enable_shared_from_this<Engine>
     void  retrieve();
     bool  dump();
     bool  recover(SizeT dst_frame);
+    bool  dump_memory();
+    bool  recover_memory(SizeT dst_frame);
     SizeT frame() const;
 
     U<Impl> m_impl;

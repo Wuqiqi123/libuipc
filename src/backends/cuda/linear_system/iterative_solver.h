@@ -19,6 +19,8 @@ class IterativeSolver : public SimSystem
     virtual void do_build(BuildInfo& info) = 0;
 
     virtual void do_solve(GlobalLinearSystem::SolvingInfo& info) = 0;
+    virtual void do_set_tolerance_rate(Float tolerance_rate);
+    virtual Float do_tolerance_rate() const;
 
 
     /**********************************************************************************************
@@ -41,5 +43,7 @@ class IterativeSolver : public SimSystem
     virtual void do_build() final override;
 
     void solve(GlobalLinearSystem::SolvingInfo& info);
+    void set_tolerance_rate(Float tolerance_rate);
+    Float tolerance_rate() const;
 };
 }  // namespace uipc::backend::cuda

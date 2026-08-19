@@ -105,6 +105,8 @@ std::string_view ISimSystem::BaseInfo::workspace() const noexcept
 
 std::string ISimSystem::BaseInfo::dump_path(std::string_view _file_) const noexcept
 {
+    if(m_config.value("memory_only", false))
+        return "memory://";
     BackendPathTool tool{m_workspace};
     return tool.workspace(_file_, "dump").string();
 }

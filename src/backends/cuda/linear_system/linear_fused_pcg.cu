@@ -65,9 +65,23 @@ void LinearFusedPCG::do_solve(GlobalLinearSystem::SolvingInfo& info)
     p.resize(N);
     Ap.resize(N);
 
-    auto iter = fused_pcg(x, b, max_iter_ratio * b.size());
+    auto result = fused_pcg(x, b, max_iter_ratio * b.size());
 
-    info.iter_count(iter);
+    info.iter_count(result.iterations);
+    info.residuals(result.initial_residual, result.final_residual);
+    info.converged(result.converged);
+}
+
+void LinearFusedPCG::do_set_tolerance_rate(Float tolerance_rate)
+{
+    if(!std::isfinite(tolerance_rate) || tolerance_rate <= 0.0)
+        throw SimEngineException("FusedPCG tolerance rate must be finite and positive");
+    global_tol_rate = tolerance_rate;
+}
+
+Float LinearFusedPCG::do_tolerance_rate() const
+{
+    return global_tol_rate;
 }
 
 void LinearFusedPCG::check_init_rz_nan_inf(Float rz)
@@ -156,7 +170,8 @@ void fused_dot(muda::CDenseVectorView<Float> x,
 // Same as linear_pcg update_xr: alpha = rz/pAp, x += alpha*p, r -= alpha*Ap. Alpha computed on device from d_rz, d_pAp.
 void fused_update_xr(muda::CVarView<Float>         d_rz,
                      muda::CVarView<Float>         d_pAp,
-                     muda::CVarView<IndexT>        d_converged,
+                     muda::VarView<IndexT>         d_converged,
+                     muda::VarView<IndexT>         d_breakdown,
                      muda::DenseVectorView<Float>  x,
                      muda::CDenseVectorView<Float> p,
                      muda::DenseVectorView<Float>  r,
@@ -169,7 +184,8 @@ void fused_update_xr(muda::CVarView<Float>         d_rz,
         .apply(r.size(),
                [d_rz        = d_rz.cviewer().name("d_rz"),
                 d_pAp       = d_pAp.cviewer().name("d_pAp"),
-                d_converged = d_converged.cviewer().name("d_converged"),
+                d_converged = d_converged.viewer().name("d_converged"),
+                d_breakdown = d_breakdown.viewer().name("d_breakdown"),
                 x           = x.viewer().name("x"),
                 p           = p.cviewer().name("p"),
                 r           = r.viewer().name("r"),
@@ -177,7 +193,15 @@ void fused_update_xr(muda::CVarView<Float>         d_rz,
                {
                    if(*d_converged != 0)
                        return;
-                   Float alpha = *d_rz / *d_pAp;
+                   Float rz   = *d_rz;
+                   Float p_ap = *d_pAp;
+                   if(!isfinite(rz) || !isfinite(p_ap) || p_ap <= Float{0.0})
+                   {
+                       *d_breakdown = 1;
+                       *d_converged = 1;
+                       return;
+                   }
+                   Float alpha = rz / p_ap;
                    x(i) += alpha * p(i);
                    r(i) -= alpha * Ap(i);
                });
@@ -231,6 +255,7 @@ void fused_swap_rz(muda::CVarView<Float>  d_rz_new,
 
 void fused_update_converged(muda::CVarView<Float> d_rz_new,
                             muda::VarView<IndexT> d_converged,
+                            muda::CVarView<IndexT> d_breakdown,
                             Float                 rz_tol)
 {
     using namespace muda;
@@ -240,21 +265,29 @@ void fused_update_converged(muda::CVarView<Float> d_rz_new,
         .apply(1,
                [d_rz_new    = d_rz_new.cviewer().name("d_rz_new"),
                 d_converged = d_converged.viewer().name("d_converged"),
+                d_breakdown = d_breakdown.cviewer().name("d_breakdown"),
                 rz_tol] __device__(int) mutable
                {
+                   if(*d_breakdown != 0)
+                   {
+                       *d_converged = 1;
+                       return;
+                   }
                    Float rz_new = *d_rz_new;
                    *d_converged = abs(rz_new) <= rz_tol ? 1 : 0;
                });
 }
 
-SizeT LinearFusedPCG::fused_pcg(muda::DenseVectorView<Float>  x,
-                                muda::CDenseVectorView<Float> b,
-                                SizeT                         max_iter)
+LinearFusedPCG::SolveResult LinearFusedPCG::fused_pcg(
+    muda::DenseVectorView<Float> x,
+    muda::CDenseVectorView<Float> b,
+    SizeT max_iter)
 {
     Timer pcg_timer{"FusedPCG"};
 
     SizeT k     = 0;
     d_converged = 0;
+    d_breakdown = 0;
 
     // r = b - A*x, but x0 = 0 so r = b
     r.buffer_view().copy_from(b.buffer_view());
@@ -275,9 +308,11 @@ SizeT LinearFusedPCG::fused_pcg(muda::DenseVectorView<Float>  x,
     Float abs_rz0 = std::abs(rz_host);
 
     if(abs_rz0 == Float{0.0})
-        return 0;
+        return SolveResult{0, 0.0, 0.0, true};
 
     Float rz_tol = global_tol_rate * abs_rz0;
+    Float final_rz_host = rz_host;
+    bool  converged     = false;
     SizeT effective_check_interval = check_interval > 0 ? check_interval : SizeT{1};
 
     for(k = 1; k < max_iter; ++k)
@@ -290,7 +325,14 @@ SizeT LinearFusedPCG::fused_pcg(muda::DenseVectorView<Float>  x,
 
         // alpha = rz / pAp,  x += alpha * p,  r -= alpha * Ap
         fused_update_xr(
-            d_rz.view(), d_pAp.view(), d_converged.view(), x, p.cview(), r.view(), Ap.cview());
+            d_rz.view(),
+            d_pAp.view(),
+            d_converged.view(),
+            d_breakdown.view(),
+            x,
+            p.cview(),
+            r.view(),
+            Ap.cview());
 
         // z = P^{-1} * r
         {
@@ -300,16 +342,34 @@ SizeT LinearFusedPCG::fused_pcg(muda::DenseVectorView<Float>  x,
 
         // rz_new = r^T * z, keep convergence flag on device for preconditioner skip.
         fused_dot(r.cview(), z.cview(), d_rz_new.view());
-        fused_update_converged(d_rz_new.view(), d_converged.view(), rz_tol);
+        fused_update_converged(
+            d_rz_new.view(), d_converged.view(), d_breakdown.view(), rz_tol);
 
         // Check error ratio periodically to avoid per-iteration D2H synchronization.
         bool do_check = (k % effective_check_interval == 0) || (k + 1 == max_iter);
         if(do_check)
         {
+            IndexT breakdown = d_breakdown;
+            if(breakdown != 0)
+            {
+                Float rz   = d_rz;
+                Float p_ap = d_pAp;
+                throw SimEngineException(fmt::format(
+                    "Frame {}, Newton {}, FusedPCG Iter {} breakdown: r^T*z = {}, p^T*A*p = {}",
+                    engine().frame(),
+                    engine().newton_iter(),
+                    k,
+                    rz,
+                    p_ap));
+            }
             Float rz_new_host = d_rz_new;
+            final_rz_host      = rz_new_host;
             check_iter_rz_nan_inf(rz_new_host, k);
             if((std::abs(rz_new_host) / abs_rz0) <= global_tol_rate)
+            {
+                converged = true;
                 break;
+            }
         }
 
         // p = z + beta * p (skip when abs(rz_new) <= rz_tol), then rz = rz_new.
@@ -317,6 +377,6 @@ SizeT LinearFusedPCG::fused_pcg(muda::DenseVectorView<Float>  x,
         fused_swap_rz(d_rz_new.view(), d_rz.view(), d_converged.view());
     }
 
-    return k;
+    return SolveResult{k, rz_host, final_rz_host, converged};
 }
 }  // namespace uipc::backend::cuda

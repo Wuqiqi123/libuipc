@@ -230,12 +230,21 @@ class GlobalLinearSystem : public SimSystem
         DenseVectorView  x() { return m_x; }
         CDenseVectorView b() { return m_b; }
         void iter_count(SizeT iter_count) { m_iter_count = iter_count; }
+        void residuals(Float initial, Float final)
+        {
+            m_initial_residual = initial;
+            m_final_residual   = final;
+        }
+        void converged(bool value) { m_converged = value; }
 
       private:
         friend class Impl;
         DenseVectorView  m_x;
         CDenseVectorView m_b;
         SizeT            m_iter_count = 0;
+        Float            m_initial_residual = 0.0;
+        Float            m_final_residual   = 0.0;
+        bool             m_converged        = true;
         Impl*            m_impl       = nullptr;
     };
 
@@ -335,6 +344,12 @@ class GlobalLinearSystem : public SimSystem
     SizeT dof_count() const;
     void  compute_gradient(ComputeGradientInfo& info);
 
+    SizeT last_iteration_count() const noexcept { return m_last_iteration_count; }
+    SizeT frame_iteration_count() const noexcept { return m_frame_iteration_count; }
+    SizeT frame_max_iteration_count() const noexcept { return m_frame_max_iteration_count; }
+    Float last_relative_residual() const noexcept { return m_last_relative_residual; }
+    bool  last_solve_converged() const noexcept { return m_last_solve_converged; }
+
     muda::LinearSystemContext& ctx() noexcept { return m_impl.ctx; }
 
   protected:
@@ -361,12 +376,21 @@ class GlobalLinearSystem : public SimSystem
 
     // only be called by SimEngine::do_advance()
     void solve();
+    void reset_frame_diagnostics() noexcept;
+    void set_tolerance_rate(Float tolerance_rate);
+    Float tolerance_rate() const;
 
     // only be called by SimEngine::do_advance()
     Float diag_norm();
     Float mass_norm();
 
     Impl m_impl;
+
+    SizeT m_last_iteration_count      = 0;
+    SizeT m_frame_iteration_count     = 0;
+    SizeT m_frame_max_iteration_count = 0;
+    Float m_last_relative_residual    = 0.0;
+    bool  m_last_solve_converged      = true;
 
     // local debug dump functions
     void _dump_A_b();
