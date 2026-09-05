@@ -1,11 +1,13 @@
 #pragma once
 #include <external_force/external_force_reporter.h>
 #include <muda/buffer/buffer_view.h>
+#include <uipc/backend/buffer_view.h>
 
 namespace uipc::backend::cuda
 {
 class FiniteElementMethod;
 class FiniteElementExternalForceReporter;
+class FEMExternalForceAccessorFeatureOverrider;
 
 /**
  * @brief Manager for finite element external forces
@@ -33,6 +35,7 @@ class FEMExternalForceManager final : public ExternalForceReporter
       public:
         FiniteElementMethod* finite_element_method = nullptr;
         SimSystemSlotCollection<FiniteElementExternalForceReporter> m_reporters;
+        backend::BufferView external_force_input;
 
         void clear();
         void step();
@@ -60,7 +63,12 @@ class FEMExternalForceManager final : public ExternalForceReporter
     virtual void do_step() override;
 
     friend class FiniteElementExternalForceReporter;
+    friend class FEMExternalForceAccessorFeatureOverrider;
     void register_reporter(FiniteElementExternalForceReporter* reporter);
+
+    void bind_external_forces(backend::BufferView buffer_view);
+    void unbind_external_forces();
+    bool has_bound_external_forces() const;
 
     Impl m_impl;
 };
