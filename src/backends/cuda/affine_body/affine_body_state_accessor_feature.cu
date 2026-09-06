@@ -49,11 +49,12 @@ void AffineBodyStateAccessorFeatureOverrider::do_copy_from(const geometry::Simpl
         q_v_subview.copy_from(m_buffer.data());
     }
 
-    // request the vertex reporter to update attributes
-    m_vertex_reporter.request_attribute_update();
-    // re-sync persistent per-joint DOF state (e.g. revolute current_angles)
-    // synchronously so it stays consistent with the freshly written body q.
-    m_joint_dof_manager.update_dof_attributes();
+    if(trans)
+    {
+        m_vertex_reporter.request_attribute_update();
+        // Re-sync joint state only when body configurations change.
+        m_joint_dof_manager.update_dof_attributes();
+    }
 }
 
 void AffineBodyStateAccessorFeatureOverrider::do_copy_to(geometry::SimplicialComplex& state_geo)
@@ -157,6 +158,6 @@ void AffineBodyStateAccessorFeatureOverrider::do_copy_velocity_from(
                 dst = q_v_subview.viewer().name("q_v_out")] __device__(int i) mutable
                { dst(i) = transform_v_to_q_v(src(i)); });
 
-    m_vertex_reporter.request_attribute_update();
+    // Velocity-only writes preserve positions and the lagged friction candidates.
 }
 }  // namespace uipc::backend::cuda
