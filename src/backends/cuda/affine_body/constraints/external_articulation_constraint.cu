@@ -71,7 +71,7 @@ class ExternalArticulationConstraint final : public InterAffineBodyConstraint
 {
   public:
     static constexpr U64   ConstraintUID   = 24ull;
-    static constexpr SizeT HalfHessianSize = 2 * (2 + 1) / 2;
+    static constexpr SizeT HessianBlockCount = 2 * 2;
 
     using InterAffineBodyConstraint::InterAffineBodyConstraint;
 
@@ -571,7 +571,7 @@ class ExternalArticulationConstraint final : public InterAffineBodyConstraint
         if(info.gradient_only())
             return;
 
-        auto h_count = joint_joint_id_to_mass.size() * HalfHessianSize;
+        auto h_count = joint_joint_id_to_mass.size() * HessianBlockCount;
         info.hessian_count(h_count);
     }
 
@@ -986,9 +986,24 @@ class ExternalArticulationConstraint final : public InterAffineBodyConstraint
                     Vector2i body_ids_i = joint_id_to_body_ids(ij[0]);
                     Vector2i body_ids_j = joint_id_to_body_ids(ij[1]);
 
-                    TripletMatrixAssembler TMA{hessians};
-
-                    TMA.half_block<2>(joint_joint_I * HalfHessianSize).write(body_ids_i, body_ids_j, H24x24);
+                    // Cross-joint blocks have different row/column body sets.
+                    // A local triangular 2x2 write drops shared-body terms. The
+                    // full mass matrix already includes (j,i), so keep exactly
+                    // the global upper triangle, without mirroring lower blocks.
+                    IndexT offset = joint_joint_I * HessianBlockCount;
+                    for(IndexT a = 0; a < 2; ++a)
+                    {
+                        for(IndexT b = 0; b < 2; ++b)
+                        {
+                            IndexT row = body_ids_i[a];
+                            IndexT col = body_ids_j[b];
+                            Matrix12x12 block = H24x24.block<12, 12>(a * 12, b * 12);
+                            if(row <= col)
+                                hessians(offset++).write(row, col, block);
+                            else
+                                hessians(offset++).write(col, row, Matrix12x12::Zero());
+                        }
+                    }
                 });
     }
 
