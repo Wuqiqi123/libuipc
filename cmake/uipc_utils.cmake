@@ -39,12 +39,36 @@ macro(uipc_error content)
 endmacro()
 
 # -----------------------------------------------------------------------------------------
+# Set and verify a target's CUDA architecture list without allowing CMake list expansion to
+# corrupt a set_target_properties() key/value sequence.
+# -----------------------------------------------------------------------------------------
+function(uipc_set_target_cuda_architectures target architectures)
+    if(NOT TARGET ${target})
+        uipc_error("Cannot set CUDA architectures on unknown target '${target}'.")
+    endif()
+    if(NOT ARGC EQUAL 2)
+        message(FATAL_ERROR
+            "[libuipc] "
+            "uipc_set_target_cuda_architectures(${target} ...) received ${ARGC} arguments. "
+            "Pass the architecture list as one quoted argument.")
+    endif()
+
+    set_property(TARGET ${target} PROPERTY CUDA_ARCHITECTURES "${architectures}")
+    get_target_property(_uipc_applied_cuda_architectures ${target} CUDA_ARCHITECTURES)
+    if(NOT "${_uipc_applied_cuda_architectures}" STREQUAL "${architectures}")
+        message(FATAL_ERROR
+            "[libuipc] "
+            "CUDA_ARCHITECTURES on target '${target}' is "
+            "'${_uipc_applied_cuda_architectures}', but '${architectures}' was requested.")
+    endif()
+endfunction()
+
+# -----------------------------------------------------------------------------------------
 # Print the options of the project
 # -----------------------------------------------------------------------------------------
 function(uipc_show_options)
     uipc_info("Options:")
     message(STATUS "    * UIPC_DEV_MODE: ${UIPC_DEV_MODE}")
-    message(STATUS "    * UIPC_BUILD_GUI: ${UIPC_BUILD_GUI}")
     message(STATUS "    * UIPC_BUILD_PYBIND: ${UIPC_BUILD_PYBIND}")
     message(STATUS "    * UIPC_BUILD_PYTHON_WHEEL: ${UIPC_BUILD_PYTHON_WHEEL}")
     message(STATUS "    * UIPC_USING_LOCAL_VCPKG: ${UIPC_USING_LOCAL_VCPKG}")
@@ -60,6 +84,7 @@ function(uipc_show_options)
 
     message(STATUS "Backend Options:")
     message(STATUS "    * UIPC_WITH_CUDA_BACKEND: ${UIPC_WITH_CUDA_BACKEND}")
+    message(STATUS "    * UIPC_WITH_CUDA_LEGACY_COLLISION: ${UIPC_WITH_CUDA_LEGACY_COLLISION}")
     message(STATUS "    * UIPC_CUDA_ARCHITECTURES: ${UIPC_CUDA_ARCHITECTURES}")
     
     message(STATUS "Details:")
@@ -120,7 +145,6 @@ function(uipc_config_vcpkg_install)
     execute_process(
         COMMAND ${UIPC_PYTHON_EXECUTABLE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen_vcpkg_json.py"
         ${VCPKG_MANIFEST_DIR} # pass the CMAKE_CURRENT_BINARY_DIR as vcpkg.json output directory
-        "--build_gui=${UIPC_BUILD_GUI}" # pass the UIPC_BUILD_GUI as argument
         "--dev_mode=${UIPC_DEV_MODE}" # pass the UIPC_DEV_MODE as argument
         "--with_usd_support=${UIPC_WITH_USD_SUPPORT}" # pass the UIPC_WITH_USD_SUPPORT as argument
         "--with_vdb_support=${UIPC_WITH_VDB_SUPPORT}" # pass the UIPC_WITH_VDB_SUPPORT as argument
@@ -200,7 +224,7 @@ endfunction()
 function(uipc_target_add_include_files target_name)
     set(INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
     target_include_directories(${target_name} PUBLIC ${INCLUDE_DIR})
-    file(GLOB_RECURSE INCLUDE_FILES "${INCLUDE_DIR}/*.h" "${INCLUDE_DIR}/*.inl")
+    file(GLOB_RECURSE INCLUDE_FILES CONFIGURE_DEPENDS "${INCLUDE_DIR}/*.h" "${INCLUDE_DIR}/*.inl")
     target_sources(${target_name} PRIVATE ${INCLUDE_FILES})
 
     # setup source group for the IDE

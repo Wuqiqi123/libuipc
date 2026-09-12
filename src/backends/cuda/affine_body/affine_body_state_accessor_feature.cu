@@ -4,10 +4,43 @@
 #include <joint_dof_system/global_joint_dof_manager.h>
 #include <uipc/builtin/attribute_name.h>
 #include <affine_body/utils.h>
-#include <muda/launch/parallel_for.h>
+#include <cuda_tool/cuda_tool.h>
 
 namespace uipc::backend::cuda
 {
+namespace
+{
+    __global__ void affine_body_state_accessor_feature_copy_transform_to_kernel(
+        cuda_tool::CBufferView<Vector12> q_in, cuda_tool::BufferView<Matrix4x4> dst, int n)
+    {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if(i >= n)
+            return;
+        dst(i) = q_to_transform(q_in(i));
+    }
+
+    __global__ void affine_body_state_accessor_feature_copy_velocity_to_kernel(
+        cuda_tool::CBufferView<Vector12> q_in, cuda_tool::BufferView<Matrix4x4> dst, int n)
+    {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if(i >= n)
+            return;
+        dst(i) = q_v_to_transform_v(q_in(i));
+    }
+    template <bool Velocity>
+    __global__ void affine_body_copy_from_kernel(
+        cuda_tool::CBufferView<Matrix4x4> src, cuda_tool::BufferView<Vector12> dst, int n)
+    {
+        int i = blockIdx.x * blockDim.x + threadIdx.x;
+        if(i >= n)
+            return;
+        if constexpr(Velocity)
+            dst(i) = transform_v_to_q_v(src(i));
+        else
+            dst(i) = transform_to_q(src(i));
+    }
+}  // namespace
+
 AffineBodyStateAccessorFeatureOverrider::AffineBodyStateAccessorFeatureOverrider(
     AffineBodyDynamics& abd, AffineBodyVertexReporter& vertex_reporter, GlobalJointDofManager& joint_dof_manager)
     : m_abd{abd}
@@ -95,14 +128,15 @@ void AffineBodyStateAccessorFeatureOverrider::do_copy_transform_to(
 
     auto* dst_ptr =
         reinterpret_cast<Matrix4x4*>(buffer_view.handle()) + buffer_view.offset();
-    muda::BufferView<Matrix4x4> dst_view{dst_ptr, body_count};
+    cuda_tool::BufferView<Matrix4x4> dst_view{dst_ptr, body_count};
 
-    muda::ParallelFor()
-        .file_line(__FILE__, __LINE__)
-        .apply(body_count,
-               [q_in = q_subview.cviewer().name("q_in"),
-                dst  = dst_view.viewer().name("dst")] __device__(int i) mutable
-               { dst(i) = q_to_transform(q_in(i)); });
+    int n = (int)body_count;
+    if(n > 0)
+    {
+        auto k = affine_body_state_accessor_feature_copy_transform_to_kernel;
+        k<<<cuda_tool::best_grid_dim(n, k), cuda_tool::best_block_dim(k), 0, nullptr>>>(
+            q_subview.cview(), dst_view, n);
+    }
 }
 
 void AffineBodyStateAccessorFeatureOverrider::do_copy_velocity_to(backend::BufferView buffer_view,
@@ -114,14 +148,15 @@ void AffineBodyStateAccessorFeatureOverrider::do_copy_velocity_to(backend::Buffe
 
     auto* dst_ptr =
         reinterpret_cast<Matrix4x4*>(buffer_view.handle()) + buffer_view.offset();
-    muda::BufferView<Matrix4x4> dst_view{dst_ptr, body_count};
+    cuda_tool::BufferView<Matrix4x4> dst_view{dst_ptr, body_count};
 
-    muda::ParallelFor()
-        .file_line(__FILE__, __LINE__)
-        .apply(body_count,
-               [q_in = q_v_subview.cviewer().name("q_v_in"),
-                dst  = dst_view.viewer().name("dst")] __device__(int i) mutable
-               { dst(i) = q_v_to_transform_v(q_in(i)); });
+    int n = (int)body_count;
+    if(n > 0)
+    {
+        auto k = affine_body_state_accessor_feature_copy_velocity_to_kernel;
+        k<<<cuda_tool::best_grid_dim(n, k), cuda_tool::best_block_dim(k), 0, nullptr>>>(
+            q_v_subview.cview(), dst_view, n);
+    }
 }
 
 void AffineBodyStateAccessorFeatureOverrider::do_copy_transform_from(
@@ -129,15 +164,16 @@ void AffineBodyStateAccessorFeatureOverrider::do_copy_transform_from(
 {
     auto* src_ptr = reinterpret_cast<const Matrix4x4*>(buffer_view.handle())
                     + buffer_view.offset();
-    muda::CBufferView<Matrix4x4> src_view{src_ptr, body_count};
+    cuda_tool::CBufferView<Matrix4x4> src_view{src_ptr, body_count};
     auto q_subview = m_abd.m_impl.body_id_to_q.view(body_offset, body_count);
 
-    muda::ParallelFor()
-        .file_line(__FILE__, __LINE__)
-        .apply(body_count,
-               [src = src_view.cviewer().name("transform_in"),
-                dst = q_subview.viewer().name("q_out")] __device__(int i) mutable
-               { dst(i) = transform_to_q(src(i)); });
+    int n = static_cast<int>(body_count);
+    if(n > 0)
+    {
+        auto k = affine_body_copy_from_kernel<false>;
+        k<<<cuda_tool::best_grid_dim(n, k), cuda_tool::best_block_dim(k), 0, nullptr>>>(
+            src_view, q_subview, n);
+    }
 
     m_vertex_reporter.request_attribute_update();
     m_joint_dof_manager.update_dof_attributes();
@@ -148,15 +184,16 @@ void AffineBodyStateAccessorFeatureOverrider::do_copy_velocity_from(
 {
     auto* src_ptr = reinterpret_cast<const Matrix4x4*>(buffer_view.handle())
                     + buffer_view.offset();
-    muda::CBufferView<Matrix4x4> src_view{src_ptr, body_count};
+    cuda_tool::CBufferView<Matrix4x4> src_view{src_ptr, body_count};
     auto q_v_subview = m_abd.m_impl.body_id_to_q_v.view(body_offset, body_count);
 
-    muda::ParallelFor()
-        .file_line(__FILE__, __LINE__)
-        .apply(body_count,
-               [src = src_view.cviewer().name("velocity_in"),
-                dst = q_v_subview.viewer().name("q_v_out")] __device__(int i) mutable
-               { dst(i) = transform_v_to_q_v(src(i)); });
+    int n = static_cast<int>(body_count);
+    if(n > 0)
+    {
+        auto k = affine_body_copy_from_kernel<true>;
+        k<<<cuda_tool::best_grid_dim(n, k), cuda_tool::best_block_dim(k), 0, nullptr>>>(
+            src_view, q_v_subview, n);
+    }
 
     // Velocity-only writes preserve positions and the lagged friction candidates.
 }

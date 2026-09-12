@@ -1,8 +1,7 @@
 #pragma once
 #include <sim_system.h>
 #include <uipc/core/contact_system_feature.h>
-#include <muda/buffer/buffer_view.h>
-#include <muda/ext/linear_system/doublet_vector_view.h>
+#include <cuda_tool/cuda_tool.h>
 
 namespace uipc::backend::cuda
 {
@@ -37,7 +36,7 @@ class ContactExporter : public SimSystem
     }
 
     static core::ContactGradientDeviceView make_contact_gradient_device_view(
-        muda::CDoubletVectorView<Float, 3> gradient)
+        cuda_tool::CDoubletVectorView<Float, 3> gradient)
     {
         auto indices = gradient.indices();
         auto values  = gradient.values();

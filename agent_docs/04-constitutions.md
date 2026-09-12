@@ -1,0 +1,97 @@
+# 04 — Constitution Overview
+
+Headers: `include/uipc/constitution/`; implementations: `src/constitution/`; mathematical specifications: `docs/specification/constitutions/`; symbolic derivation: `scripts/symbol_calculation/*.ipynb` (SymEigen generates energy/gradient/Hessian code for applicable models). The 2026-09-11 empty-file check passes; the old empty-placeholder note is obsolete. See [audit A04/D08](14-project-audit.md) for parameter validation and energy-density interpretation.
+
+## Basic Mechanisms
+
+- Base classes `IConstitution` / `Constitution` (`constitution.h`); constraint base class `Constraint` (`constraint.h`).
+- Unified usage: `constitution.apply_to(geometry, params...)` — writes the UID into `meta().create<U64>(builtin::constitution_uid)` and writes parameters into vertex/instance attributes. The backend claims geometries by UID.
+- **UID convention**: official `[0, 2^32-1]`, user-defined `[2^32, 2^64-1]`. Registration lives in `include/uipc/builtin/constitution_uid_collection.h` plus `constitution_uid_auto_register.h`; there is no `constitution_uid.h`.
+- `ElasticModuli` (`elastic_moduli.h`): constructors such as `youngs_poisson(E, nu)` produce Lamé parameters.
+- Category base classes: `FiniteElementConstitution` (deformable bodies whose DOFs are vertex positions), `AffineBodyConstitution` (12-DOF affine bodies), `InterAffineBodyConstitution` / `InterPrimitiveConstitution` (inter-body / inter-primitive), `FiniteElementExtraConstitution` / `AffineBodyExtraConstitution` (additional energies).
+
+## The Two Main Base Classes
+
+### Affine Body (ABD, UID 1–8 series, `affine_body.md`)
+
+- State q=(p; a₁;a₂;a₃): translation + rows of the affine matrix, 12 DOF; J is the 3×12 Jacobian.
+- Meta attributes: `volume`, `mass_density`, the dyadic mass triple (`abd_mass`, `abd_mass_x_bar`, `abd_mass_x_bar_x_bar`), `inertia`, `dof_offset/count`.
+- Instance attributes: `kappa` (recommended 100 MPa–100 GPa), `is_fixed`, `is_dynamic`, `velocity`.
+- Variants:
+  - #1 OrthoPotential: $V=\kappa\bar v\|AA^T-I\|_F^2$
+  - #2 ARAP: $V=\kappa\bar v\|A-R\|_F^2$
+  - `AffineBodyShell` / `AffineBodyRod`: codim variants (shell volume = A·2r, rod = πr²L), vertices carry `thickness`.
+
+### Finite Element (FEM, `finite_element.md`)
+
+Vertex positions are the DOFs; Empty/Particle/ARAP/SNH/HookeanSpring etc. all inherit from it.
+
+## Model Catalog (header → description)
+
+### Elastic Bodies
+| Header | Description |
+|---|---|
+| `empty.h` | UID 0, no shape-preservation energy, mass only; more stable and faster when driven entirely by constraints |
+| `stable_neo_hookean.h` | Stable Neo-Hookean tetrahedral elasticity, `ElasticModuli::youngs_poisson(E, nu)`. **Since 2026-08-24 this is Stiff-GIPC's SNK1 verbatim** (energy `0.5μ(Ic-3) + 0.5λ(J-1-μ/λ)²`, gradient `μF + (λ(J-1)-μ)·cof(F)`, and the analytic SPD-projected Hessian — twist/flip eigensystem from `math::qr_svd` + a 3×3 direct eigensolve, clamp-and-rebuild; replaces the SymEigen-generated SNH (`0.5λ(J-α)²+0.5μ(Ic-3)-0.5μ·log(Ic+1)`, α=1+0.75μ/λ) + generic 9×9 `make_spd` EVD). The Wilkinson shift transfers its sign with an explicit `T`-precision branch (`sign(0)=+1`) so float CUDA paths never enter a standard-library sign-copy overload. The historical controlled A/B measured case-88 297→266 ms/frame and case-89 PCG 213→77/solve; use the 2026-09-01 cross-domain record for current absolute timings. |
+| `arap.h` | ARAP energy |
+| `particle.h` | Mass point (no elasticity) |
+| `hookean_spring.h` | Axial density $\psi=\frac{\kappa}{2}((L-L_0)/L_0)^2$; physical edge energy multiplies by $\pi r^2L_0$ for a uniform positive radius |
+| `neo_hookean_shell.h` | 2D Neo-Hookean shell |
+| `baraff_witkin_shell.h` | Compatibility include for the historical header name; forwards to the implemented `StrainLimitingBaraffWitkinShell` API below |
+| `strain_limiting_baraff_witkin.h` | Implemented `StrainLimitingBaraffWitkinShell` with independent stretch/shear `(E,ν)` pairs and `strain_rate`. The stored `thickness=r` is one-sided: stretch is `E_s·(2r)/(1-ν_s²)` while shear remains the independently calibrated 2D coefficient `E_sh/(2(1+ν_sh))`; both energies use triangle rest area. |
+| `discrete_shell_bending.h` | Discrete Shells hinge energy `κ(L₀/h̄)(θ-θ̄)²`, with `L₀/h̄=3L₀²/(A₁+A₂)` and no second area multiplier. Raw `apply_to(sc,κ)` writes κ directly. The formula overload reads one-sided vertex radius `r`, averages it per edge, and writes `κ=E·(2r)³/(12(1-ν²))`. |
+| `strain_plastic_discrete_shell_bending.h` / `stress_plastic_discrete_shell_bending.h` | Shell bending with strain/stress plasticity |
+| `kirchhoff_rod_bending.h` | Kirchhoff rod bending |
+
+### ABD and ABD Joints (joint axes defined by `linemesh` edges; multi-instance API supports `geo_slots + instance_id + strength_ratio`)
+| Header | Description |
+|---|---|
+| `affine_body_constitution.h` | ABD base class |
+| `affine_body_revolute_joint.h` | Revolute joint (1 rotational DOF) |
+| `affine_body_revolute_joint_limit.h` | Revolute joint with limits |
+| `affine_body_driving_revolute_joint.h` | Driven revolute joint (target angular velocity/angle) |
+| `affine_body_revolute_joint_external_force.h` | External force on a revolute joint |
+| `affine_body_prismatic_joint.h` (+`_limit`, `_external_force`, `driving_`) | Prismatic joint family |
+| `affine_body_spherical_joint.h` | Spherical joint |
+| `affine_body_fixed_joint.h` | Fixed joint |
+| `affine_body_external_force.h` | ABD external force |
+
+### Constraints (coupled with the Animator, require `is_constrained=1`)
+| Header | Description |
+|---|---|
+| `soft_transform_constraint.h` | Drives an affine body's `aim_transform` |
+| `soft_position_constraint.h` | Drives vertices' `aim_position` |
+| `external_articulation_constraint.h` | Minimal-coordinate joint system (contributed by Genesis AI, paired with AL-IPC) |
+
+`soft_transform_constraint.h` also declares the C++ `RotatingMotor` and
+`LinearMotor`. All three classes return UID 16 and drive `aim_transform` in
+material coordinates. `SoftTransformConstraint`, `RotatingMotor` and `LinearMotor`
+are all exposed in `src/pybind/pyuipc/constitution/soft_transform_constraint.cpp`;
+the earlier unbound-motor statement is obsolete.
+
+### Soft Stitching (stitch, Inter-primitive)
+| Header | Description |
+|---|---|
+| `soft_vertex_stitch.h` | Vertex-vertex stitch |
+| `soft_vertex_edge_stitch.h` | Vertex-edge stitch |
+| `soft_vertex_triangle_stitch.h` | Vertex-triangle stitch |
+
+### Others
+| Header | Description |
+|---|---|
+| `finite_element_external_force.h` | FEM external force (additional) |
+| `conversion.h` | Utilities such as rigid-body → affine-body conversion |
+
+## Usage Notes
+
+- Parameter formulas/ranges are documented where available under `docs/specification/constitutions/` (for example, ABD $\kappa$: 100 MPa–100 GPa). Verify constructor validation in source before treating a prose range as enforced.
+- A new material model requires: implementing the `IConstitution` family interface + assigning a UID + writing attributes in `apply_to` + implementing the corresponding SimSystem in the backend to claim the UID + validating/clamping parameters (negative stiffness/density forbidden).
+- Joint runtime state such as the angle can be read from edge attributes of the joint geometry (e.g. the `angle` attribute of a revolute joint; see `apps/tests/sim_case/37_abd_revolute_joint.cpp`).
+- `scripts/gen_uid_doc.py` recognizes both designated `UIDInfo{...}` values and
+  statement-assigned `UIDInfo` registrations. Its unit test locks the two syntax
+  styles and the historically omitted UIDs 15, 17, 31, and 32; the docs workflow
+  runs that test and `--check` before building the site.
+
+- Internal auto-registration contains UID 27 (`AffineBodyDrivingSphericalJoint`)
+  and UID 28 (`AffineBodyD6Joint`) without matching public constitution classes or
+  headers. A registered backend UID is not automatically a supported user API.
